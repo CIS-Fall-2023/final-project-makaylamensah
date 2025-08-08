@@ -69,14 +69,13 @@ VALID_USERNAME = "admin"
 VALID_PASSWORD = "password123"
 
 def _extract_credentials(req):
-    """Support JSON or form submissions."""
     if req.is_json:
         data = req.get_json(silent=True) or {}
         return data.get("username", ""), data.get("password", "")
     return req.form.get("username", ""), req.form.get("password", "")
 
 # -------------------------------------------------
-# UI routes (templates)
+# UI routes (templates)  — keep these ONLY for pages
 # -------------------------------------------------
 @app.route("/")
 def root():
@@ -94,21 +93,19 @@ def floors_page():
 def rooms_page():
     return render_template("rooms.html")
 
-@app.route('/residents')
+@app.route("/residents", methods=["GET"])
 def residents_page():
-    return render_template('residents.html')
-
-
+    return render_template("residents.html")
 
 # -------------------------------------------------
-# Health (optional)
+# Health
 # -------------------------------------------------
-@app.route("/health", methods=["GET"])
+@app.route("/api/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"}), 200
 
 # -------------------------------------------------
-# API routes (prefix: /api)
+# API routes (prefix: /api) — JSON ONLY
 # -------------------------------------------------
 
 # ---- LOGIN ----
@@ -157,11 +154,10 @@ def api_delete_floor(floor_id):
     return jsonify({"message": "Floor deleted"}), 200
 
 # ---- ROOMS ----
-@app.route('/rooms', methods=['GET'])
-def get_rooms():
-    rooms = Room.query.all()
-    return jsonify([{"id": r.id, "capacity": r.capacity, "number": r.number, "floor": r.floor} for r in rooms])
-
+@app.route("/api/rooms", methods=["GET"])
+def api_get_rooms():
+    rooms = Room.query.order_by(Room.number.asc()).all()
+    return jsonify([r.to_dict() for r in rooms]), 200
 
 @app.route("/api/rooms", methods=["POST"])
 def api_add_room():
@@ -180,12 +176,9 @@ def api_add_room():
 def api_update_room(room_id):
     room = Room.query.get_or_404(room_id)
     data = request.get_json(silent=True) or {}
-    if "capacity" in data:
-        room.capacity = int(data["capacity"])
-    if "number" in data:
-        room.number = int(data["number"])
-    if "floor" in data:
-        room.floor = int(data["floor"])
+    if "capacity" in data: room.capacity = int(data["capacity"])
+    if "number" in data:   room.number   = int(data["number"])
+    if "floor" in data:    room.floor    = int(data["floor"])
     db.session.commit()
     return jsonify({"message": "Room updated"}), 200
 
@@ -197,64 +190,59 @@ def api_delete_room(room_id):
     return jsonify({"message": "Room deleted"}), 200
 
 # ---- RESIDENTS ----
-# Resident CRUD endpoints (safe version)
-@app.route('/residents', methods=['GET'])
-def get_residents():
-    residents = Resident.query.all()
-    output = []
+@app.route("/api/residents", methods=["GET"])
+def api_get_residents():
+    residents = Resident.query.order_by(Resident.lastname.asc(), Resident.firstname.asc()).all()
+    out = []
     for r in residents:
-        try:
-            output.append({
-                "id": r.id,
-                "firstname": r.firstname,
-                "lastname": r.lastname,
-                "age": r.age,
-                "room": int(r.room) if isinstance(r.room, int) else getattr(r.room, "id", None)
-            })
-        except Exception as e:
-            print("Error serializing resident:", e)
-    return jsonify(output)
+        out.append({
+            "id": r.id,
+            "firstname": r.firstname,
+            "lastname": r.lastname,
+            "age": r.age,
+            "room": int(r.room) if isinstance(r.room, int) else getattr(r.room, "id", r.room),
+        })
+    return jsonify(out), 200
 
-@app.route('/residents', methods=['POST'])
-def add_resident():
-    data = request.json
+@app.route("/api/residents", methods=["POST"])
+def api_add_resident():
+    data = request.get_json(silent=True) or {}
     try:
-        new_resident = Resident(
-            firstname=data['firstname'],
-            lastname=data['lastname'],
-            age=int(data['age']),
-            room=int(data['room'])
+        res = Resident(
+            firstname=str(data["firstname"]),
+            lastname=str(data["lastname"]),
+            age=int(data["age"]),
+            room=int(data["room"]),
         )
-        db.session.add(new_resident)
+        db.session.add(res)
         db.session.commit()
-        return jsonify({"message": "Resident added", "id": new_resident.id}), 201
+        return jsonify({"message": "Resident added", "id": res.id}), 201
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
 
-@app.route('/residents/<int:id>', methods=['PUT'])
-def update_resident(id):
-    resident = Resident.query.get_or_404(id)
-    data = request.json
+@app.route("/api/residents/<int:resident_id>", methods=["PUT"])
+def api_update_resident(resident_id):
+    r = Resident.query.get_or_404(resident_id)
+    data = request.get_json(silent=True) or {}
     try:
-        resident.firstname = data.get('firstname', resident.firstname)
-        resident.lastname = data.get('lastname', resident.lastname)
-        resident.age = int(data.get('age', resident.age))
-        if 'room' in data:
-            resident.room = int(data['room'])
+        if "firstname" in data: r.firstname = str(data["firstname"])
+        if "lastname"  in data: r.lastname  = str(data["lastname"])
+        if "age"       in data: r.age       = int(data["age"])
+        if "room"      in data: r.room      = int(data["room"])
         db.session.commit()
-        return jsonify({"message": "Resident updated"})
+        return jsonify({"message": "Resident updated"}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
 
-@app.route('/residents/<int:id>', methods=['DELETE'])
-def delete_resident(id):
-    resident = Resident.query.get_or_404(id)
+@app.route("/api/residents/<int:resident_id>", methods=["DELETE"])
+def api_delete_resident(resident_id):
+    r = Resident.query.get_or_404(resident_id)
     try:
-        db.session.delete(resident)
+        db.session.delete(r)
         db.session.commit()
-        return jsonify({"message": "Resident deleted"})
+        return jsonify({"message": "Resident deleted"}), 200
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
@@ -265,5 +253,5 @@ def delete_resident(id):
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
-    # change port if 5000 is busy: app.run(debug=True, port=5001)
+    # app.run(debug=True, port=5001)  # use a different port if 5000 is busy
     app.run(debug=True)
