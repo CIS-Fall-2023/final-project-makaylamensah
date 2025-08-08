@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Residents — Senior Facility</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    .page { max-width: 800px; margin: 0 auto; padding: 20px; }
+    .topnav { display:flex; gap:16px; padding:10px 16px; background:#f3f4f6; margin-bottom:10px; }
+    .topnav a[aria-current="page"] { font-weight: 700; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap:12px; align-items:end; }
+    @media (max-width: 900px){ .grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 600px){ .grid { grid-template-columns: 1fr; } }
+    .cardlist { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+    .card { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; }
+    .actions { display:flex; gap:8px; }
+    .danger { background:#ef4444; color:#fff; }
+    .muted { color:#6b7280; margin-top:8px; }
+    .hidden { display:none !important; }
+    .notice { background:#fff3cd; border:1px solid #ffe69c; color:#5c4b00; padding:10px 12px; border-radius:6px; margin:8px 0; }
+  </style>
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/floors">Floors</a>
+    <a href="/rooms">Rooms</a>
+    <a href="/residents" aria-current="page">Residents</a>
+    <a href="/login">Log out</a>
+  </nav>
+
+  <main class="page">
+    <h1>Residents</h1>
+    <p class="muted">Add residents and assign them to rooms.</p>
+
+    <!-- Add Resident -->
+    <form id="residentForm" class="grid" autocomplete="off">
+      <div>
+        <label for="firstname">First name</label>
+        <input id="firstname" type="text" required placeholder="e.g., Maria"/>
+      </div>
+      <div>
+        <label for="lastname">Last name</label>
+        <input id="lastname" type="text" required placeholder="e.g., Chen"/>
+      </div>
+      <div>
+        <label for="age">Age</label>
+        <input id="age" type="number" min="0" required placeholder="e.g., 78"/>
+      </div>
+      <div>
+        <label for="roomSelect">Room</label>
+        <select id="roomSelect" required>
+          <option value="">Select Room</option>
+        </select>
+      </div>
+      <button type="submit">Add Resident</button>
+    </form>
+
+    <div id="noRoomsMsg" class="notice hidden">
+      No rooms found. <a href="/rooms">Add a room first</a>, then come back to assign residents.
+    </div>
+
+    <!-- List -->
+    <h2 style="margin-top:24px;">Current Residents</h2>
+    <p id="emptyState" class="muted">No residents yet. Add one above.</p>
+    <ul id="residentsList" class="cardlist" aria-live="polite"></ul>
+  </main>
+
+  <template id="residentItem">
+    <li class="card">
+      <div class="card-main"></div>
+      <div class="actions">
+        <button class="edit" type="button">Edit</button>
+        <button class="delete danger" type="button">Delete</button>
+      </div>
+    </li>
+  </template>
+
+  <script>
+    const API_BASE = "/api"; // set to "" if your APIs are not prefixed
+
+    const resForm  = document.getElementById('residentForm');
+    const roomSel  = document.getElementById('roomSelect');
+    const noRooms  = document.getElementById('noRoomsMsg');
+    const list     = document.getElementById('residentsList');
+    const empty    = document.getElementById('emptyState');
+    const tpl      = document.getElementById('residentItem');
+
+    function toggle(el, show){ el.classList.toggle('hidden', !show); }
+    function setEmpty(show){ empty.classList.toggle('hidden', !show); }
+
+    async function loadRoomsDropdown() {
+      const res = await fetch(`${API_BASE}/rooms`);
+      if (!res.ok) { console.error('Failed to load rooms'); return; }
+      const rooms = await res.json();
+      roomSel.innerHTML = '<option value="">Select Room</option>';
+      if (!rooms.length) { toggle(noRooms, true); return; }
+      toggle(noRooms, false);
+      rooms.forEach(r => {
+        const opt = document.createElement('option');
+        opt.value = r.id;
+        opt.textContent = `Room ${r.number} (capacity ${r.capacity})`;
+        roomSel.appendChild(opt);
+      });
+    }
+
+    function renderRow(p) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.dataset.id = p.id;
+      node.querySelector('.card-main').textContent =
+        `${p.firstname} ${p.lastname} — Age ${p.age} — Room ${p.room}`;
+
+      node.querySelector('.edit').addEventListener('click', async () => {
+        const nf = prompt('First name:', p.firstname); if (nf === null) return;
+        const nl = prompt('Last name:', p.lastname); if (nl === null) return;
+        const na = prompt('Age:', p.age); if (na === null) return;
+        const nr = prompt('Room ID (see Rooms page):', p.room); if (nr === null) return;
+
+        const res = await fetch(`${API_BASE}/residents/${p.id}`, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            firstname: nf.trim(),
+            lastname: nl.trim(),
+            age: Number(na),
+            room: Number(nr)
+          })
+        });
+        if (res.ok) loadResidents(); else alert('Update failed.');
+      });
+
+      node.querySelector('.delete').addEventListener('click', async () => {
+        if (!confirm('Remove this resident from the facility?')) return;
+        const res = await fetch(`${API_BASE}/residents/${p.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          node.remove();
+          if (!list.children.length) setEmpty(true);
+        } else {
+          alert('Delete failed.');
+        }
+      });
+
+      return node;
+    }
+
+    async function loadResidents() {
+      const res = await fetch(`${API_BASE}/residents`);
+      if (!res.ok) { console.error('Failed to load residents'); return; }
+      const people = await res.json();
+      list.innerHTML = '';
+      if (!people.length) { setEmpty(true); return; }
+      setEmpty(false);
+      people.forEach(p => list.appendChild(renderRow(p)));
+    }
+
+    resForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const firstname = document.getElementById('firstname').value.trim();
+      const lastname  = document.getElementById('lastname').value.trim();
+      const age       = Number(document.getElementById('age').value);
+      const room      = Number(roomSel.value);
+      if (!room) { alert('Please select a room'); return; }
+
+      const res = await fetch(`${API_BASE}/residents`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ firstname, lastname, age, room })
+      });
+
+      if (res.ok) {
+        resForm.reset();
+        await loadResidents();
+      } else {
+        alert('Add failed.');
+      }
+    });
+
+    // init
+    loadRoomsDropdown();
+    loadResidents();
+  </script>
+</body>
+</html>

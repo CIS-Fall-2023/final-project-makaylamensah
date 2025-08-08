@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Rooms — Senior Facility</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    .page { max-width: 800px; margin: 0 auto; padding: 20px; }
+    .topnav { display:flex; gap:16px; padding:10px 16px; background:#f3f4f6; margin-bottom:10px; }
+    .topnav a[aria-current="page"] { font-weight: 700; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr 1fr auto; gap:12px; align-items:end; }
+    @media (max-width: 768px){ .grid { grid-template-columns: 1fr; } }
+    .cardlist { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+    .card { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; }
+    .actions { display:flex; gap:8px; }
+    .danger { background:#ef4444; color:#fff; }
+    .muted { color:#6b7280; margin-top:8px; }
+    .hidden { display:none !important; }
+    .notice { background:#fff3cd; border:1px solid #ffe69c; color:#5c4b00; padding:10px 12px; border-radius:6px; margin:8px 0; }
+  </style>
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/floors">Floors</a>
+    <a href="/rooms" aria-current="page">Rooms</a>
+    <a href="/residents">Residents</a>
+    <a href="/login">Log out</a>
+  </nav>
+
+  <main class="page">
+    <h1>Rooms</h1>
+    <p class="muted">Create and manage rooms. Room numbers should start with their floor level (e.g., Level 2 → 201).</p>
+
+    <!-- Add Room -->
+    <form id="roomForm" class="grid" autocomplete="off">
+      <div>
+        <label for="capacity">Capacity</label>
+        <input id="capacity" type="number" min="1" required placeholder="e.g., 2"/>
+      </div>
+      <div>
+        <label for="number">Room number</label>
+        <input id="number" type="number" required placeholder="e.g., 201"/>
+      </div>
+      <div>
+        <label for="floorSelect">Floor</label>
+        <select id="floorSelect" required>
+          <option value="">Select Floor</option>
+        </select>
+      </div>
+      <button type="submit">Add Room</button>
+    </form>
+
+    <div id="noFloorsMsg" class="notice hidden">
+      No floors found. <a href="/floors">Add a floor first</a>, then come back to create rooms.
+    </div>
+
+    <!-- List -->
+    <h2 style="margin-top:24px;">Existing Rooms</h2>
+    <p id="emptyState" class="muted">No rooms yet. Add your first room above.</p>
+    <ul id="roomsList" class="cardlist" aria-live="polite"></ul>
+  </main>
+
+  <template id="roomItem">
+    <li class="card">
+      <div class="card-main"></div>
+      <div class="actions">
+        <button class="edit" type="button">Edit</button>
+        <button class="delete danger" type="button">Delete</button>
+      </div>
+    </li>
+  </template>
+
+  <script>
+    const API_BASE = "/api"; // if your APIs are not prefixed, set "" instead
+
+    const roomForm   = document.getElementById('roomForm');
+    const floorSel   = document.getElementById('floorSelect');
+    const noFloors   = document.getElementById('noFloorsMsg');
+    const roomsList  = document.getElementById('roomsList');
+    const emptyState = document.getElementById('emptyState');
+    const tpl        = document.getElementById('roomItem');
+
+    function show(el, yes) { el.classList.toggle('hidden', !yes); }
+    function setEmptyVisible(yes){ emptyState.classList.toggle('hidden', !yes); }
+
+    async function loadFloorsDropdown() {
+      const res = await fetch(`${API_BASE}/floors`);
+      if (!res.ok) { console.error('Failed to load floors'); return; }
+      const floors = await res.json();
+
+      floorSel.innerHTML = '<option value="">Select Floor</option>';
+      if (!floors.length) {
+        show(noFloors, true);
+        return;
+      }
+      show(noFloors, false);
+
+      floors.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f.id; // FK id
+        opt.textContent = `Level ${f.level} — ${f.name}`;
+        floorSel.appendChild(opt);
+      });
+    }
+
+    function renderRoomRow(r) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.dataset.id = r.id;
+      node.querySelector('.card-main').textContent =
+        `Room ${r.number} — Capacity: ${r.capacity} — Floor ID: ${r.floor}`;
+
+      node.querySelector('.edit').addEventListener('click', async () => {
+        const newCap = prompt('New capacity:', r.capacity); if (newCap === null) return;
+        const newNum = prompt('New room number:', r.number); if (newNum === null) return;
+        const newFlr = prompt('New floor ID (see Floors page):', r.floor); if (newFlr === null) return;
+
+        const res = await fetch(`${API_BASE}/rooms/${r.id}`, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ capacity: Number(newCap), number: Number(newNum), floor: Number(newFlr) })
+        });
+        if (res.ok) loadRooms();
+        else alert('Update failed.');
+      });
+
+      node.querySelector('.delete').addEventListener('click', async () => {
+        if (!confirm('Delete this room? Residents may block deletion.')) return;
+        const res = await fetch(`${API_BASE}/rooms/${r.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          node.remove();
+          if (!roomsList.children.length) setEmptyVisible(true);
+        } else {
+          alert('Delete failed.');
+        }
+      });
+
+      return node;
+    }
+
+    async function loadRooms() {
+      const res = await fetch(`${API_BASE}/rooms`);
+      if (!res.ok) { console.error('Failed to load rooms'); return; }
+      const rooms = await res.json();
+      roomsList.innerHTML = '';
+      if (!rooms.length) { setEmptyVisible(true); return; }
+      setEmptyVisible(false);
+      rooms.forEach(r => roomsList.appendChild(renderRoomRow(r)));
+    }
+
+    roomForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const capacity = Number(document.getElementById('capacity').value);
+      const number   = Number(document.getElementById('number').value);
+      const floor    = Number(floorSel.value);
+      if (!floor) { alert('Please select a floor'); return; }
+
+      const res = await fetch(`${API_BASE}/rooms`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ capacity, number, floor })
+      });
+
+      if (res.ok) {
+        roomForm.reset();
+        await loadRooms();
+      } else {
+        alert('Add failed.');
+      }
+    });
+
+    // Init
+    loadFloorsDropdown();
+    loadRooms();
+  </script>
+</body>
+</html>

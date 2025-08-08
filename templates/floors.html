@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Floors — Senior Facility</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  <style>
+    /* Minimal in-page styles to guarantee visibility */
+    .page { max-width: 800px; margin: 0 auto; padding: 20px; }
+    .topnav { display:flex; gap:16px; padding:10px 16px; background:#f3f4f6; margin-bottom:10px; }
+    .topnav a[aria-current="page"] { font-weight: 700; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+    @media (max-width: 640px){ .grid { grid-template-columns: 1fr; } }
+    .cardlist { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+    .card { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; }
+    .actions { display:flex; gap:8px; }
+    .danger { background:#ef4444; color:#fff; }
+    .muted { color:#6b7280; margin-top:8px; }
+    .hidden { display:none !important; }
+  </style>
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/floors" aria-current="page">Floors</a>
+    <a href="/rooms">Rooms</a>
+    <a href="/residents">Residents</a>
+    <a href="/login">Log out</a>
+  </nav>
+
+  <main class="page">
+    <h1>Floors</h1>
+    <p class="muted">Add, rename, or remove floors. The floor <em>level</em> can be negative (basements), zero, or positive.</p>
+
+    <!-- ADD FORM -->
+    <form id="floorForm" class="grid" autocomplete="off">
+      <div>
+        <label for="level">Floor level</label>
+        <input id="level" type="number" required placeholder="e.g., -1, 0, 1, 2"/>
+      </div>
+      <div>
+        <label for="name">Floor name</label>
+        <input id="name" type="text" required placeholder="e.g., East Wing"/>
+      </div>
+      <button id="addBtn" type="submit">Add Floor</button>
+    </form>
+
+    <!-- LIST SECTION -->
+    <h2 style="margin-top:24px;">Existing Floors</h2>
+    <p id="emptyState" class="muted">No floors yet. Add your first floor above.</p>
+    <ul id="floorsList" class="cardlist" aria-live="polite"></ul>
+  </main>
+
+  <!-- Row template (hidden) -->
+  <template id="floorItem">
+    <li class="card">
+      <div class="card-main"></div>
+      <div class="actions">
+        <button class="edit" type="button">Edit</button>
+        <button class="delete danger" type="button">Delete</button>
+      </div>
+    </li>
+  </template>
+
+  <script>
+    // ====== Elements ======
+    const list = document.getElementById('floorsList');
+    const emptyState = document.getElementById('emptyState');
+    const form = document.getElementById('floorForm');
+    const tpl  = document.getElementById('floorItem');
+
+    // ====== API base ======
+    // If your backend still uses /floors (no /api), change API_BASE to "".
+    const API_BASE = "/api";
+
+    // ====== Helpers ======
+    function showEmpty(show) {
+      emptyState.classList.toggle('hidden', !show);
+    }
+
+    function renderFloorRow(floor) {
+      const node = tpl.content.firstElementChild.cloneNode(true);
+      node.dataset.id = floor.id; // hidden PK, not shown
+
+      // Visible text: Level {level} — {name}
+      node.querySelector('.card-main').textContent = `Level ${floor.level} — ${floor.name}`;
+
+      // EDIT button
+      node.querySelector('.edit').addEventListener('click', async () => {
+        const newLevel = prompt('New level:', floor.level);
+        if (newLevel === null) return;
+
+        const newName = prompt('New name:', floor.name);
+        if (newName === null) return;
+
+        const res = await fetch(`${API_BASE}/floors/${floor.id}`, {
+          method: 'PUT',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ level: Number(newLevel), name: String(newName).trim() })
+        });
+        if (res.ok) {
+          // update inline without full reload
+          floor.level = Number(newLevel);
+          floor.name = String(newName).trim();
+          node.querySelector('.card-main').textContent = `Level ${floor.level} — ${floor.name}`;
+        } else {
+          alert('Update failed. Try again.');
+        }
+      });
+
+      // DELETE button
+      node.querySelector('.delete').addEventListener('click', async () => {
+        if (!confirm('Delete this floor? Rooms on this floor may block deletion.')) return;
+        const res = await fetch(`${API_BASE}/floors/${floor.id}`, { method: 'DELETE' });
+        if (res.ok) {
+          node.remove();
+          // After removal, if list is empty, show empty state
+          if (!list.children.length) showEmpty(true);
+        } else {
+          alert('Delete failed. This floor may have rooms or residents.');
+        }
+      });
+
+      return node;
+    }
+
+    async function loadFloors() {
+      const res = await fetch(`${API_BASE}/floors`);
+      if (!res.ok) {
+        alert('Failed to load floors');
+        return;
+      }
+      const floors = await res.json();
+      list.innerHTML = '';
+      if (!floors.length) {
+        showEmpty(true);
+        return;
+      }
+      showEmpty(false);
+      floors.forEach(f => list.appendChild(renderFloorRow(f)));
+    }
+
+    // Add Floor (submit)
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const level = Number(document.getElementById('level').value);
+      const name  = String(document.getElementById('name').value).trim();
+
+      const res = await fetch(`${API_BASE}/floors`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ level, name })
+      });
+
+      if (res.ok) {
+        form.reset();
+        // Option 1: just reload everything
+        await loadFloors();
+        // (This ensures the new floor appears in the list immediately)
+      } else {
+        alert('Add failed. Please try again.');
+      }
+    });
+
+    // Initial render
+    loadFloors();
+  </script>
+</body>
+</html>

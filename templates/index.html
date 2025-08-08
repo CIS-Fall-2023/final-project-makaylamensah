@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Login — Senior Facility</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <nav class="topnav">
+    <strong>Senior Facility</strong>
+  </nav>
+
+  <main class="container">
+    <h1>Staff Login</h1>
+    <div id="loginError" class="error-msg" aria-live="polite"></div>
+
+    <form id="loginForm" class="stack">
+      <label for="username">Username</label>
+      <input id="username" type="text" required />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" required />
+
+      <button type="submit">Log in</button>
+    </form>
+  </main>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const err = document.getElementById('loginError');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value.trim();
+
+      try {
+        const res = await fetch('/login', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          window.location.href = '/floors';
+        } else {
+          err.textContent = data.error || 'Invalid credentials';
+        }
+      } catch (e2) {
+        err.textContent = 'Server error. Try again.';
+      }
+    });
+  </script>
+</body>
+</html>
